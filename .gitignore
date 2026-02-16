@@ -1,0 +1,22 @@
+# SWI-Prolog compiled artifacts (if any)
+*.qlf
+*.qlf.*
+*.wam
+*.po
+*.o
+*.obj
+
+# Windows
+Thumbs.db
+.DS_Store
+
+# Logs/output
+prolog_engine_logs/
+*.log
+
+# Build outputs
+*.exe
+
+# Editor/IDE
+.vscode/
+*.swp

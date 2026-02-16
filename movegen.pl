@@ -30,7 +30,7 @@ in_check(Pos, Color) :-
 
 pseudo_move(Pos, Color, MoveStr) :-
     position:piece(Pos, Color, Type, From),
-    integer(From), From >= 0, From =< 63,   % <-- guard: required for arithmetic
+    integer(From), From >= 0, From =< 63,   % guard: required for arithmetic
     piece_pseudo_move(Pos, Color, Type, From, MoveStr).
 
 
@@ -90,14 +90,11 @@ uci_promo(From, To, PromoChar, MoveStr) :-
 
 pawn_move(Pos, white, From, MoveStr) :-
     rank_of(From, R),
-    file_of(From, _),
-
-    % one step forward
     To1 is From + 8,
     on_board(To1),
     empty(Pos, To1),
     ( R =:= 7 ->
-        uci_promo(From, To1, "q", MoveStr)  % promote to queen
+        uci_promo(From, To1, "q", MoveStr)
     ; uci(From, To1, MoveStr)
     ).
 
@@ -127,9 +124,6 @@ pawn_move(Pos, white, From, MoveStr) :-
 
 pawn_move(Pos, black, From, MoveStr) :-
     rank_of(From, R),
-    file_of(From, _F),
-
-    % one step forward (towards rank 1)
     To1 is From - 8,
     on_board(To1),
     empty(Pos, To1),
@@ -213,7 +207,6 @@ ray_step(Pos, Color, From, D, MoveStr) :-
     ; fail
     ).
 ray_step(Pos, Color, From, D, MoveStr) :-
-    % continue ray only if first square is empty
     To is From + D,
     on_board(To),
     step_ok(From, To, D),
@@ -226,26 +219,20 @@ king_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, king, Sq), !.
 
 attacks_square(Pos, Color, Sq) :-
-    % Use pseudo attacks (fast): enough for check legality filtering
     position:piece(Pos, Color, pawn, From),
     pawn_attacks(Color, From, Sq).
-
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, knight, From),
     knight_attacks(From, Sq).
-
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, bishop, From),
     slider_attacks(Pos, From, [9,7,-7,-9], Sq).
-
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, rook, From),
     slider_attacks(Pos, From, [8,-8,1,-1], Sq).
-
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, queen, From),
     slider_attacks(Pos, From, [9,7,-7,-9,8,-8,1,-1], Sq).
-
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, king, From),
     king_attacks(From, Sq).

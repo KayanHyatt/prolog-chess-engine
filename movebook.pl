@@ -7,7 +7,7 @@
 :- use_module(movegen).
 :- use_module(eval).
 
-% If search.pl is present, we’ll use it.
+% search is optional; if present we use it
 :- ( catch(use_module(search), _, fail) -> true ; true ).
 
 % choose_move(+Color, -Move)
@@ -15,7 +15,7 @@
 choose_move(Color, Move) :-
     engine_state:get_position(Pos),
     findall(M, movegen:legal_move(Pos, Color, M), Ms0),
-    sort(Ms0, Ms),                % remove dups
+    sort(Ms0, Ms),
     (   Ms == []
     ->  Move = resign
     ;   (   can_search
@@ -25,18 +25,15 @@ choose_move(Color, Move) :-
     ).
 
 can_search :-
-    % search:best_move/5 exists and is callable
     functor(H, best_move, 5),
     predicate_property(search:H, _), !.
 
 choose_by_search(Pos, Color, Ms, Move) :-
-    % Depth 2 is a safe default. Bump later.
     (   catch(search:best_move(Pos, Color, 2, Best, _Score), _, fail),
         Best \= none,
         member(Best, Ms)
     ->  Move = Best
-    ;   % If search fails for any reason, don’t crash—fallback.
-        choose_by_1ply(Pos, Color, Ms, Move)
+    ;   choose_by_1ply(Pos, Color, Ms, Move)
     ).
 
 choose_by_1ply(Pos, Color, Ms, Move) :-

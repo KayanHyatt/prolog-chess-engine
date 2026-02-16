@@ -14,7 +14,6 @@ evaluate_for(Me, Pos, Score) :-
     mobility(Pos, Me, Them, S_mob),
     development(Pos, Me, Them, S_dev),
 
-    % No side-to-move predicate assumed in your position, so tempo = 0
     S_tempo = 0,
 
     weight(material,     Wm),
@@ -32,7 +31,7 @@ evaluate_for(Me, Pos, Score) :-
 other_color(white, black).
 other_color(black, white).
 
-% ---- weights (tune later) ----
+% ---- weights ----
 weight(material,     1).
 weight(pawns,        1).
 weight(mobility,     2).
@@ -64,7 +63,7 @@ material_psqt(Pos, Me, Them, Score) :-
         TheirSum),
     Score is MySum - TheirSum.
 
-% ---- tiny “PSQT-like” formulas (safe; always bind P) ----
+% ---- tiny “PSQT-like” formulas ----
 psqt_bonus(pawn, white, Sq, P) :-
     rank_of(Sq, R),
     P is (R-2)*5.
@@ -93,17 +92,16 @@ dist_center(F, R, D) :-
     DC is abs(F-4) + abs(R-4),
     (DC > 3 -> D = 3 ; D = DC).
 
-% 0..63 indexing assumed (a1=0 .. h8=63)
 file_of(Sq, F) :- F is (Sq mod 8) + 1.
 rank_of(Sq, R) :- R is (Sq // 8) + 1.
 
-% ---- mobility (legal move count difference) ----
+% ---- mobility ----
 mobility(Pos, Me, Them, Score) :-
     catch(aggregate_all(count, movegen:legal_move(Pos, Me, _), M1), _, M1 = 0),
     catch(aggregate_all(count, movegen:legal_move(Pos, Them, _), M2), _, M2 = 0),
     Score is M1 - M2.
 
-% ---- development (tiny anti-shuffle heuristic) ----
+% ---- development ----
 development(Pos, Me, Them, Score) :-
     development_one(Pos, Me,  S1),
     development_one(Pos, Them, S2),
@@ -122,7 +120,7 @@ dev_bonus(bishop, white, Sq, 10) :- Sq =\= 2, Sq =\= 5, !.
 dev_bonus(bishop, black, Sq, 10) :- Sq =\= 58, Sq =\= 61, !.
 dev_bonus(_, _, _, 0).
 
-% ---- pawn structure (doubled / isolated / passed) ----
+% ---- pawn structure ----
 pawn_structure(Pos, Me, Them, Score) :-
     doubled_pawns(Pos, Me, Dm),
     doubled_pawns(Pos, Them, Dt),

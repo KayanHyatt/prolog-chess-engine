@@ -1,27 +1,35 @@
-# Prolog Chess Engine (WinBoard/XBoard)
+# Prolog Chess Engine (CLI Self-Play Harness)
 
-A chess engine written in SWI-Prolog that speaks the WinBoard/XBoard protocol.
+This version runs **without WinBoard/XBoard**. It is meant for correctness + stability work.
 
-## Run
-Edit `run_engine.bat` to point to your SWI-Prolog install and project path, then run:
-- `run_engine.bat`
+## Requirements
+- SWI-Prolog installed and on Windows typically at:
+  `C:\Program Files\swipl\bin\swipl.exe`
 
-## Protocol
-Supports:
-- `xboard`, `protover 2`
-- `usermove ...`
-- `ping/pong`
-- `new`, `go`, `force`, `white`, `black`, `quit`
+## Run (Windows)
+Double-click or run:
 
-## Logging
-Writes logs to:
-%TEMP%\prolog_engine_logs\engine_<pid>.log
+- `run_selfplay.bat`
+
+## Run (any OS / terminal)
+From the project folder:
+
+```bash
+swipl -q -f none -s selfplay.pl -g main -t halt
+```
+
+## What it does
+- Initializes an internal position
+- Repeatedly chooses a move for the side to move
+- Applies it
+- Prints a simple move list
+- Stops on resign or after a move limit
 
 ## Files
-- `xboard.pl` protocol loop
-- `engine_state.pl` dynamic engine state
-- `position.pl` board representation + apply move
-- `movegen.pl` legal move generation
-- `eval.pl` evaluation
-- `search.pl` alpha-beta
-- `movebook.pl` move selection
+- `engine_state.pl` - dynamic engine state + history + apply/undo
+- `position.pl`      - board representation + UCI move application
+- `movegen.pl`       - legal move generator + check detection
+- `eval.pl`          - evaluation function (material + heuristics)
+- `search.pl`        - alpha-beta search
+- `movebook.pl`      - move selection (search fallback)
+- `selfplay.pl`      - CLI harness (Option 2)

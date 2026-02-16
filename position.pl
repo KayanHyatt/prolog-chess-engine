@@ -55,7 +55,7 @@ initial_position(pos(Ps)) :-
 apply_move(Pos0, MoveStr, Pos1) :-
     parse_uci(MoveStr, From, To, Promo),
     ( is_castle_move(From, To, Side) ->
-        apply_castle(Pos0, Side, From, To, Pos1)
+        apply_castle(Pos0, Side, Pos1)
     ; apply_normal(Pos0, From, To, Promo, Pos1)
     ).
 
@@ -91,19 +91,19 @@ apply_normal(pos(Ps0), From, To, Promo, pos(Ps3)) :-
     ),
     Ps3 = [pc(C,T2,To)|Ps2].
 
-% --- simple castling support ---
+% --- simple castling support (move only; legality not validated here) ---
 is_castle_move(From, To, white_kingside) :- From =:= 4,  To =:= 6.
 is_castle_move(From, To, white_queenside):- From =:= 4,  To =:= 2.
 is_castle_move(From, To, black_kingside) :- From =:= 60, To =:= 62.
 is_castle_move(From, To, black_queenside):- From =:= 60, To =:= 58.
 
-apply_castle(pos(Ps0), Side, _From, _To, pos(Ps2)) :-
-    castle_squares(Side, KingFrom, KingTo, RookFrom, RookTo),
+apply_castle(pos(Ps0), Side, pos(Ps2)) :-
+    castle_squares(Side, Color, KingFrom, KingTo, RookFrom, RookTo),
     select(pc(Color, king, KingFrom), Ps0, PsA),
     select(pc(Color, rook, RookFrom), PsA, PsB),
     Ps2 = [pc(Color, king, KingTo), pc(Color, rook, RookTo) | PsB].
 
-castle_squares(white_kingside, 4, 6, 7, 5)  :- Color = white, Color=Color.
-castle_squares(white_queenside,4, 2, 0, 3)  :- Color = white, Color=Color.
-castle_squares(black_kingside, 60,62,63,61) :- Color = black, Color=Color.
-castle_squares(black_queenside,60,58,56,59) :- Color = black, Color=Color.
+castle_squares(white_kingside,  white, 4, 6, 7, 5).
+castle_squares(white_queenside, white, 4, 2, 0, 3).
+castle_squares(black_kingside,  black, 60,62,63,61).
+castle_squares(black_queenside, black, 60,58,56,59).

@@ -57,3 +57,4 @@ score_after(Pos, Color, MoveStr, Score) :-
     ->  catch(eval:evaluate_for(Color, Pos2, Score), _, Score = 0)
     ;   Score = 0
     ).
+

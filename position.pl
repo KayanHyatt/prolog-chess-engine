@@ -3,7 +3,8 @@
     apply_move/3,
     piece/4,
     sq_index/2,
-    index_sq/2
+    index_sq/2,
+    ep_square/2
 ]).
 
 /*
@@ -12,6 +13,9 @@ Position representation:
   Pieces = [pc(Color,Type,SqIndex), ...]
 SqIndex is 0..63 where 0=a1, 7=h1, 56=a8, 63=h8
 */
+
+% If you haven't implemented EP state yet, default to none.
+ep_square(_Pos, none).
 
 piece(pos(Ps), C, T, Sq) :- member(pc(C,T,Sq), Ps).
 

@@ -59,7 +59,7 @@ capture_kind(Pos, Side, _Type, _From, To, Capture, false) :-
     ( position:piece(Pos, Enemy, _, To), Enemy \= Side -> Capture = true ; Capture = false ).
 
 % -------- SAN building --------
-base_san(Pos, Side, pawn, From, To, Capture, _EpCap, PromoChar, San) :-
+base_san(_Pos, _Side, pawn, From, To, Capture, _EpCap, PromoChar, San) :-
     % pawn SAN: file if capture, then "x", then target
     to_sq(To, ToSq),
     file_of(From, FF),

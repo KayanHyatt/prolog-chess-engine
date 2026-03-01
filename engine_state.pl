@@ -11,7 +11,9 @@
     get_position/1, set_position/1,
     apply_move/1,           % apply_move(+MoveStr)  (fails if invalid)
     undo/0,                 % undo one half-move (if possible)
-    remove/0                % undo two half-moves (if possible)
+    remove/0,               % undo two half-moves (if possible)
+
+    repetition_count/2      % repetition_count(+Pos, -Count)
 ]).
 
 :- use_module(position).
@@ -95,3 +97,10 @@ set_position_keep_history(P, Hist) :-
     retractall(history(_)),
     asserta(position(P)),
     asserta(history(Hist)).
+
+% repetition_count(+Pos, -Count)
+% Count is how many times Pos appears in the stored history.
+repetition_count(Pos, Count) :-
+    ( history(H) -> true ; H = [] ),
+    include(=(Pos), H, Matches),
+    length(Matches, Count).

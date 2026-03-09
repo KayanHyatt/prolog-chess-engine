@@ -1,6 +1,7 @@
 :- module(movegen, [
     legal_move/3,
-    in_check/2
+    in_check/2,
+    insufficient_material/1
 ]).
 
 :- use_module(position).
@@ -18,19 +19,38 @@ other_color(black, white).
 
 legal_move(Pos, Color, MoveStr) :-
     pseudo_move(Pos, Color, MoveStr),
-    position:apply_move(Pos, MoveStr, Pos2),
-    \+ in_check(Pos2, Color).
+    position:make_move(Pos, MoveStr, Undo),
+    ( \+ in_check(Pos, Color)
+    -> position:unmake_move(Pos, Undo)
+    ;  position:unmake_move(Pos, Undo),
+       fail
+    ).
 
 in_check(Pos, Color) :-
     king_square(Pos, Color, Ksq),
     other_color(Color, Enemy),
     attacks_square(Pos, Enemy, Ksq).
 
+% Very small insufficient-material detector.
+% True if neither side has material to force mate (K vs K, K+minor vs K).
+insufficient_material(Pos) :-
+    findall(T, position:piece(Pos, white, T, _), WTs),
+    findall(T, position:piece(Pos, black, T, _), BTs),
+    insufficient_side(WTs),
+    insufficient_side(BTs).
+
+insufficient_side(Ts0) :-
+    exclude(=(king), Ts0, Ts),
+    ( Ts == []
+    ; Ts = [bishop]
+    ; Ts = [knight]
+    ).
+
 % -------- Pseudo move generation (piece rules + occupancy) --------
 
 pseudo_move(Pos, Color, MoveStr) :-
     position:piece(Pos, Color, Type, From),
-    integer(From), From >= 0, From =< 63,   % guard: required for arithmetic
+    integer(From), From >= 0, From =< 63,   % <-- guard: required for arithmetic
     piece_pseudo_move(Pos, Color, Type, From, MoveStr).
 
 
@@ -50,14 +70,19 @@ piece_pseudo_move(Pos, Color, king, From, MoveStr) :-
 % -------- Helpers: occupancy / bounds --------
 
 occupied(Pos, Sq) :-
-    position:piece(Pos, _, _, Sq).
+    position:piece_at(Pos, Sq, _C, _T).
 
 occupied_by(Pos, Color, Sq) :-
-    position:piece(Pos, Color, _, Sq).
+    position:piece_at(Pos, Sq, Color, _T).
 
 enemy_at(Pos, Color, Sq) :-
     other_color(Color, Enemy),
     occupied_by(Pos, Enemy, Sq).
+
+% Never allow capturing the enemy king (keeps positions and PGNs valid)
+enemy_king_at(Pos, Color, Sq) :-
+    other_color(Color, Enemy),
+    position:piece_at(Pos, Sq, Enemy, king).
 
 empty(Pos, Sq) :- \+ occupied(Pos, Sq).
 
@@ -86,15 +111,19 @@ uci_promo(From, To, PromoChar, MoveStr) :-
     uci(From, To, Base),
     string_concat(Base, PromoChar, MoveStr).
 
-% -------- Pawn moves (no en passant yet, basic promotion to queen) --------
+% -------- Pawn moves (with en-passant + full promotions) --------
 
 pawn_move(Pos, white, From, MoveStr) :-
     rank_of(From, R),
+    file_of(From, _),
+
+    % one step forward
     To1 is From + 8,
     on_board(To1),
     empty(Pos, To1),
     ( R =:= 7 ->
-        uci_promo(From, To1, "q", MoveStr)
+        promo_char(P),
+        uci_promo(From, To1, P, MoveStr)
     ; uci(From, To1, MoveStr)
     ).
 
@@ -110,7 +139,8 @@ pawn_move(Pos, white, From, MoveStr) :-
     file_of(From, F),
     rank_of(From, R),
     ( F > 1 -> ToL is From + 7, on_board(ToL), enemy_at(Pos, white, ToL),
-      ( R =:= 7 -> uci_promo(From, ToL, "q", MoveStr) ; uci(From, ToL, MoveStr) )
+      \+ enemy_king_at(Pos, white, ToL),
+      ( R =:= 7 -> promo_char(P), uci_promo(From, ToL, P, MoveStr) ; uci(From, ToL, MoveStr) )
     ; fail
     ).
 
@@ -118,17 +148,32 @@ pawn_move(Pos, white, From, MoveStr) :-
     file_of(From, F),
     rank_of(From, R),
     ( F < 8 -> ToR is From + 9, on_board(ToR), enemy_at(Pos, white, ToR),
-      ( R =:= 7 -> uci_promo(From, ToR, "q", MoveStr) ; uci(From, ToR, MoveStr) )
+      \+ enemy_king_at(Pos, white, ToR),
+      ( R =:= 7 -> promo_char(P), uci_promo(From, ToR, P, MoveStr) ; uci(From, ToR, MoveStr) )
     ; fail
+    ).
+
+% En-passant capture for white
+pawn_move(Pos, white, From, MoveStr) :-
+    position:ep_square(Pos, EPSq),
+    EPSq \= none,
+    file_of(From, F),
+    rank_of(From, 5),
+    ( F > 1, ToL is From + 7, ToL =:= EPSq -> uci(From, ToL, MoveStr)
+    ; F < 8, ToR is From + 9, ToR =:= EPSq -> uci(From, ToR, MoveStr)
     ).
 
 pawn_move(Pos, black, From, MoveStr) :-
     rank_of(From, R),
+    file_of(From, _F),
+
+    % one step forward (towards rank 1)
     To1 is From - 8,
     on_board(To1),
     empty(Pos, To1),
     ( R =:= 2 ->
-        uci_promo(From, To1, "q", MoveStr)
+        promo_char(P),
+        uci_promo(From, To1, P, MoveStr)
     ; uci(From, To1, MoveStr)
     ).
 
@@ -144,7 +189,8 @@ pawn_move(Pos, black, From, MoveStr) :-
     file_of(From, F),
     rank_of(From, R),
     ( F > 1 -> ToL is From - 9, on_board(ToL), enemy_at(Pos, black, ToL),
-      ( R =:= 2 -> uci_promo(From, ToL, "q", MoveStr) ; uci(From, ToL, MoveStr) )
+      \+ enemy_king_at(Pos, black, ToL),
+      ( R =:= 2 -> promo_char(P), uci_promo(From, ToL, P, MoveStr) ; uci(From, ToL, MoveStr) )
     ; fail
     ).
 
@@ -152,9 +198,25 @@ pawn_move(Pos, black, From, MoveStr) :-
     file_of(From, F),
     rank_of(From, R),
     ( F < 8 -> ToR is From - 7, on_board(ToR), enemy_at(Pos, black, ToR),
-      ( R =:= 2 -> uci_promo(From, ToR, "q", MoveStr) ; uci(From, ToR, MoveStr) )
+      \+ enemy_king_at(Pos, black, ToR),
+      ( R =:= 2 -> promo_char(P), uci_promo(From, ToR, P, MoveStr) ; uci(From, ToR, MoveStr) )
     ; fail
     ).
+
+% En-passant capture for black
+pawn_move(Pos, black, From, MoveStr) :-
+    position:ep_square(Pos, EPSq),
+    EPSq \= none,
+    file_of(From, F),
+    rank_of(From, 4),
+    ( F > 1, ToL is From - 9, ToL =:= EPSq -> uci(From, ToL, MoveStr)
+    ; F < 8, ToR is From - 7, ToR =:= EPSq -> uci(From, ToR, MoveStr)
+    ).
+
+promo_char("q").
+promo_char("r").
+promo_char("b").
+promo_char("n").
 
 % -------- Knight moves --------
 
@@ -166,7 +228,9 @@ knight_move(Pos, Color, From, MoveStr) :-
     To is From + D,
     on_board(To),
     knight_step_ok(From, To),
-    ( empty(Pos, To) ; enemy_at(Pos, Color, To) ),
+    ( empty(Pos, To)
+    ; ( enemy_at(Pos, Color, To), \+ enemy_king_at(Pos, Color, To) )
+    ),
     uci(From, To, MoveStr).
 
 knight_step_ok(From, To) :-
@@ -176,7 +240,7 @@ knight_step_ok(From, To) :-
     DR is abs(R2 - R1),
     (DF =:= 1, DR =:= 2 ; DF =:= 2, DR =:= 1).
 
-% -------- King moves (no castling yet) --------
+% -------- King moves (with castling) --------
 
 king_delta( 9). king_delta( 8). king_delta( 7).
 king_delta( 1). king_delta(-1).
@@ -188,30 +252,72 @@ king_move(Pos, Color, From, MoveStr) :-
     on_board(To),
     step_ok(From, To, D),
     \+ occupied_by(Pos, Color, To),
+    \+ enemy_king_at(Pos, Color, To),
     uci(From, To, MoveStr).
+
+% Castling pseudo-moves with full legality checks (no check, no through-check, squares empty, rights).
+king_move(Pos, white, 4, MoveStr) :-
+    position:castling_rights(Pos, cr(WK,WQ,_,_)),
+    ( WK == true, castle_legal(Pos, white, kingside, MoveStr)
+    ; WQ == true, castle_legal(Pos, white, queenside, MoveStr)
+    ).
+
+king_move(Pos, black, 60, MoveStr) :-
+    position:castling_rights(Pos, cr(_,_,BK,BQ)),
+    ( BK == true, castle_legal(Pos, black, kingside, MoveStr)
+    ; BQ == true, castle_legal(Pos, black, queenside, MoveStr)
+    ).
+
+castle_legal(Pos, Color, kingside, MoveStr) :-
+    \+ in_check(Pos, Color),
+    ( Color == white -> KFrom=4, KTo=6, Pass=5, RFrom=7, EmptySq=[5,6]
+    ; Color == black -> KFrom=60, KTo=62, Pass=61, RFrom=63, EmptySq=[61,62]
+    ),
+    % rook exists
+    position:piece(Pos, Color, rook, RFrom),
+    forall(member(S, EmptySq), empty(Pos, S)),
+    other_color(Color, Enemy),
+    \+ attacks_square(Pos, Enemy, Pass),
+    \+ attacks_square(Pos, Enemy, KTo),
+    uci(KFrom, KTo, MoveStr).
+
+castle_legal(Pos, Color, queenside, MoveStr) :-
+    \+ in_check(Pos, Color),
+    ( Color == white -> KFrom=4, KTo=2, Pass=3, RFrom=0, EmptySq=[1,2,3]
+    ; Color == black -> KFrom=60, KTo=58, Pass=59, RFrom=56, EmptySq=[57,58,59]
+    ),
+    position:piece(Pos, Color, rook, RFrom),
+    forall(member(S, EmptySq), empty(Pos, S)),
+    other_color(Color, Enemy),
+    \+ attacks_square(Pos, Enemy, Pass),
+    \+ attacks_square(Pos, Enemy, KTo),
+    uci(KFrom, KTo, MoveStr).
 
 % -------- Sliding pieces (bishop/rook/queen) --------
 
 slider_move(Pos, Color, From, Deltas, MoveStr) :-
     member(D, Deltas),
-    ray_step(Pos, Color, From, D, MoveStr).
+    ray_step(Pos, Color, From, From, D, MoveStr).
 
-ray_step(Pos, Color, From, D, MoveStr) :-
-    To is From + D,
+% ray_step(+Pos,+Color,+OrigFrom,+CurSq,+Delta,-MoveStr)
+% IMPORTANT: OrigFrom stays constant. CurSq advances along the ray.
+ray_step(Pos, Color, OrigFrom, CurSq, D, MoveStr) :-
+    To is CurSq + D,
     on_board(To),
-    step_ok(From, To, D),
+    step_ok(CurSq, To, D),
     ( empty(Pos, To) ->
-        uci(From, To, MoveStr)
-    ; enemy_at(Pos, Color, To) ->
-        uci(From, To, MoveStr)
-    ; fail
+        uci(OrigFrom, To, MoveStr)
+    ; enemy_at(Pos, Color, To),
+      \+ enemy_king_at(Pos, Color, To) ->
+        uci(OrigFrom, To, MoveStr)
     ).
-ray_step(Pos, Color, From, D, MoveStr) :-
-    To is From + D,
+
+ray_step(Pos, Color, OrigFrom, CurSq, D, MoveStr) :-
+    To is CurSq + D,
     on_board(To),
-    step_ok(From, To, D),
+    step_ok(CurSq, To, D),
     empty(Pos, To),
-    ray_step(Pos, Color, To, D, MoveStr).
+    ray_step(Pos, Color, OrigFrom, To, D, MoveStr).
 
 % -------- Attack detection (for check) --------
 
@@ -219,20 +325,26 @@ king_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, king, Sq), !.
 
 attacks_square(Pos, Color, Sq) :-
+    % Use pseudo attacks (fast): enough for check legality filtering
     position:piece(Pos, Color, pawn, From),
     pawn_attacks(Color, From, Sq).
+
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, knight, From),
     knight_attacks(From, Sq).
+
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, bishop, From),
     slider_attacks(Pos, From, [9,7,-7,-9], Sq).
+
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, rook, From),
     slider_attacks(Pos, From, [8,-8,1,-1], Sq).
+
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, queen, From),
     slider_attacks(Pos, From, [9,7,-7,-9,8,-8,1,-1], Sq).
+
 attacks_square(Pos, Color, Sq) :-
     position:piece(Pos, Color, king, From),
     king_attacks(From, Sq).

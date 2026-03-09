@@ -3,7 +3,7 @@
 
     set_mode/1, mode/1,
     set_my_color/1, my_color/1,
-    set_side_to_move/1, side_to_move/1, toggle_side_to_move/0,
+    set_side_to_move/1, side_to_move/1,
 
     note_played/2, played/2,
     clear_played/0,
@@ -13,14 +13,14 @@
     undo/0,                 % undo one half-move (if possible)
     remove/0,               % undo two half-moves (if possible)
 
-    repetition_count/2      % repetition_count(+Pos, -Count)
+    repetition_count/2,
+    recent_position/2      % repetition_count(+Pos, -Count)
 ]).
 
 :- use_module(position).
 
 :- dynamic mode/1.
 :- dynamic my_color/1.
-:- dynamic side_to_move/1.
 :- dynamic played/2.
 :- dynamic position/1.
 :- dynamic history/1.
@@ -28,13 +28,11 @@
 reset_state :-
     retractall(mode(_)),
     retractall(my_color(_)),
-    retractall(side_to_move(_)),
     retractall(played(_,_)),
     retractall(position(_)),
     retractall(history(_)),
-    % Default after "new": engine is Black; White to move.
+    % Default after "new": engine is Black; initial position is White to move.
     asserta(my_color(black)),
-    asserta(side_to_move(white)),
     asserta(mode(play)),
     position:initial_position(P),
     asserta(position(P)),
@@ -42,13 +40,16 @@ reset_state :-
 
 set_mode(M) :- retractall(mode(_)), asserta(mode(M)).
 set_my_color(C) :- retractall(my_color(_)), asserta(my_color(C)).
-set_side_to_move(S) :- retractall(side_to_move(_)), asserta(side_to_move(S)).
+% side_to_move is stored in the position; these are compatibility helpers.
+side_to_move(S) :-
+    get_position(P),
+    position:side_to_move(P, S).
 
-toggle_side_to_move :-
-    ( retract(side_to_move(white)) -> asserta(side_to_move(black))
-    ; retract(side_to_move(black)) -> asserta(side_to_move(white))
-    ; asserta(side_to_move(white))
-    ).
+set_side_to_move(S) :-
+    get_position(P0),
+    position:clone_position(P0, P2),
+    setarg(3, P2, S),
+    set_position(P2).
 
 note_played(Color, Move) :- assertz(played(Color, Move)).
 clear_played :- retractall(played(_,_)).
@@ -79,11 +80,11 @@ push_position(P) :-
     asserta(history([P|H])).
 
 % undo/0
-% Undo one half-move if possible. Also toggles side_to_move.
+% Undo one half-move if possible.
 undo :-
     ( retract(history([_Cur, Prev | Rest]))
     -> set_position_keep_history(Prev, [Prev|Rest]),
-       toggle_side_to_move
+       true
     ;  true ).
 
 % remove/0
@@ -101,6 +102,26 @@ set_position_keep_history(P, Hist) :-
 % repetition_count(+Pos, -Count)
 % Count is how many times Pos appears in the stored history.
 repetition_count(Pos, Count) :-
+    position:repetition_key(Pos, K),
     ( history(H) -> true ; H = [] ),
-    include(=(Pos), H, Matches),
-    length(Matches, Count).
+    findall(1,
+        ( member(P, H),
+          position:repetition_key(P, K2),
+          K2 == K ),
+        Ones),
+    length(Ones, Count).
+
+% recent_position(+Pos, +Window)
+% True if Pos appears within the last Window positions (excluding current head).
+recent_position(Pos, Window) :-
+    position:repetition_key(Pos, K),
+    ( history([_Cur|Rest]) -> true ; Rest = [] ),
+    take(Rest, Window, Recent),
+    member(P2, Recent),
+    position:repetition_key(P2, K2),
+    K2 == K.
+
+take(_List, 0, []) :- !.
+take([], _N, []).
+take([X|Xs], N, [X|Ys]) :-
+    N > 0, N1 is N-1, take(Xs, N1, Ys).

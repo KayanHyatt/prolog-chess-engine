@@ -71,7 +71,15 @@ moves_to_san_lines(StartPos, MovesUci, Sans) :-
 
 moves_to_san_(_Pos, _Side, [], []).
 moves_to_san_(Pos0, Side0, [Uci|Rest], [San|Sans]) :-
-    san:uci_to_san(Pos0, Side0, Uci, San),
+    ( san:uci_to_san_checked(Pos0, Side0, Uci, San0, ok, _Dbg) ->
+        San = San0
+    ; san:uci_to_san_checked(Pos0, Side0, Uci, SanBad, err(Reason), _Dbg2) ->
+        % Keep PGN replayable for debugging: mark the move and record the raw UCI.
+        % (Chess.com will likely reject "??", but this pinpoints the exact ply.)
+        format(string(San), "~w {uci:~w san_error:~w}", [SanBad, Uci, Reason])
+    ;   % total failure (shouldn't happen)
+        format(string(San), "?? {uci:~w san_error:unknown}", [Uci])
+    ),
     ( position:apply_move(Pos0, Uci, Pos1) -> true ; Pos1 = Pos0 ),
     other_side(Side0, Side1),
     moves_to_san_(Pos1, Side1, Rest, Sans).

@@ -1,4 +1,7 @@
-:- module(san, [uci_to_san/4]).
+:- module(san, [
+    uci_to_san/4,
+    uci_to_san_checked/6
+]).
 
 :- use_module(library(lists)).
 :- use_module(position).
@@ -19,18 +22,74 @@ Assumes UCI is legal in given position (best results).
 */
 
 uci_to_san(Pos, Side, Uci, San) :-
+    % Backwards-compatible wrapper.
+    % If SAN generation fails sanity checks, we return "??" rather than risking a wrong SAN.
+    ( uci_to_san_checked(Pos, Side, Uci, San0, ok, _Dbg)
+    -> San = San0
+    ;  San = "??"
+    ).
+
+/*
+uci_to_san_checked(+Pos, +SideToMove, +UciMove, -SanString, -Status, -Debug)
+
+Status is:
+  - ok
+  - err(Reason)
+
+Debug is:
+  dbg(FromIdx, ToIdx, MovingType, PromoChar, IsCastle)
+
+This predicate is designed for PGN writing / debugging: it refuses to emit a
+potentially incorrect SAN. In particular it:
+  - Determines the moving piece strictly from the From-square.
+  - Validates that applying the UCI move results in the expected piece on To.
+  - On any mismatch/failure it returns Status=err(...) and San="??".
+*/
+uci_to_san_checked(Pos, Side, UciIn, San, Status, Dbg) :-
+    normalize_uci(UciIn, Uci),
     ( is_castle(Uci, CastleSan) ->
-        suffix_check(Pos, Side, Uci, CastleSan, San)
-    ; parse_uci(Uci, From, To, PromoChar),
-      moving_piece(Pos, Side, From, Type),
-      capture_kind(Pos, Side, Type, From, To, Capture, EpCapture),
-      base_san(Pos, Side, Type, From, To, Capture, EpCapture, PromoChar, Base),
-      suffix_check(Pos, Side, Uci, Base, San)
+        Dbg = dbg(none, none, king, none, true),
+        ( position:apply_move(Pos, Uci, _Pos2)
+        -> suffix_check(Pos, Side, Uci, CastleSan, San),
+           Status = ok
+        ;  San = "??",
+           Status = err(apply_move_failed(castle)),
+           !
+        )
+    ; parse_uci(Uci, From, To, PromoChar) ->
+        ( moving_piece_checked(Pos, Side, From, Type) ->
+            Dbg = dbg(From, To, Type, PromoChar, false),
+            ( position:apply_move(Pos, Uci, Pos2) ->
+                ( validate_resulting_piece(Pos2, Side, Type, To, PromoChar, Reason0) ->
+                    capture_kind(Pos, Side, Type, From, To, Capture, EpCapture),
+                    base_san(Pos, Side, Type, From, To, Capture, EpCapture, PromoChar, Base),
+                    suffix_check(Pos, Side, Uci, Base, San),
+                    Status = ok
+                ;   San = "??",
+                    Status = err(Reason0)
+                )
+            ;   San = "??",
+                Status = err(apply_move_failed(Uci))
+            )
+        ;   San = "??",
+            Dbg = dbg(From, To, none, PromoChar, false),
+            Status = err(no_piece_on_from(From))
+        )
+    ;   San = "??",
+        Status = err(bad_uci(Uci)),
+        Dbg = dbg(none, none, none, none, false)
     ).
 
 % -------- parsing helpers --------
+normalize_uci(UciIn, Uci) :-
+    ( string(UciIn) -> Uci = UciIn
+    ; atom(UciIn)   -> atom_string(UciIn, Uci)
+    ; term_string(UciIn, Uci)
+    ).
+
 parse_uci(Uci, From, To, PromoChar) :-
-    string_chars(Uci, Cs),
+    normalize_uci(Uci, U),
+    string_chars(U, Cs),
     Cs = [F1,R1,F2,R2|Rest],
     string_chars(SFrom, [F1,R1]),
     string_chars(STo,   [F2,R2]),
@@ -40,6 +99,33 @@ parse_uci(Uci, From, To, PromoChar) :-
 
 moving_piece(Pos, Side, From, Type) :-
     position:piece(Pos, Side, Type, From), !.
+
+moving_piece_checked(Pos, Side, From, Type) :-
+    integer(From), From >= 0, From =< 63,
+    position:piece(Pos, Side, Type, From), !.
+
+validate_resulting_piece(Pos2, Side, Type, To, PromoChar, Reason) :-
+    expected_type(Type, PromoChar, ExpType),
+    ( position:piece(Pos2, Side, ExpType, To) ->
+        true
+    ; findall(T, position:piece(Pos2, Side, T, To), Ts),
+      ( Ts == [] -> Reason = post_move_missing_piece(To, ExpType)
+      ; Reason = post_move_piece_mismatch(To, expected(ExpType), found(Ts))
+      ),
+      fail
+    ).
+
+expected_type(pawn, none, pawn) :- !.
+expected_type(pawn, P, T2) :-
+    P \= none,
+    promo_piece_letter(P, L),
+    promo_letter_type(L, T2), !.
+expected_type(T, _P, T).
+
+promo_letter_type("Q", queen).
+promo_letter_type("R", rook).
+promo_letter_type("B", bishop).
+promo_letter_type("N", knight).
 
 is_castle("e1g1", "O-O").
 is_castle("e1c1", "O-O-O").

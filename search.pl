@@ -15,6 +15,14 @@ Upgraded search:
   - transposition table (TT)
   - move ordering (captures/promos/checks + killer + history)
   - quiescence search at depth 0 (captures/promos/checks)
+
+BUG FIXES applied:
+  1. gives_check/3 now always calls unmake_move (was corrupting position)
+  2. aspiration_search uses fresh variables for widening calls
+  3. Depth is pre-evaluated (D1 is Depth-1) before recursive calls so
+     killers/history/TT store integer depths, not compound terms
+  4. LMR else-branch uses fresh variable to avoid unification failure
+  5. cap_tt_size counts once instead of O(n^2) findall loop
 */
 
 :- dynamic tt/5.          % tt(Hash, Depth, Flag, Score, BestMove)
@@ -61,18 +69,22 @@ loop_depth(D, MaxD, Pos, Color, Alpha0, Beta0, CurM, CurS, BestM, BestS) :-
 
 % aspiration_search(+Pos,+Color,+Depth,+PrevScore,+A0,+B0,-Move,-Score)
 % Uses a small window around the previous score; widens if it fails.
+%
+% FIX #2: Use fresh variables M0/S0 for initial search so widening calls
+% don't fail from trying to rebind already-bound output variables.
 aspiration_search(Pos, Color, Depth, Prev, A0, B0, BestMove, BestScore) :-
     Window is 50,
     ( Prev =:= 0 -> Alpha is A0, Beta is B0
     ; Alpha is max(A0, Prev-Window),
       Beta  is min(B0, Prev+Window)
     ),
-    catch(alphabeta_root(Pos, Color, Depth, Alpha, Beta, BestMove, BestScore), timeout, throw(timeout)),
-    ( BestScore =< Alpha -> % fail-low: widen
+    catch(alphabeta_root(Pos, Color, Depth, Alpha, Beta, M0, S0), timeout, throw(timeout)),
+    ( S0 =< Alpha -> % fail-low: widen
         catch(alphabeta_root(Pos, Color, Depth, A0, Beta, BestMove, BestScore), timeout, throw(timeout))
-    ; BestScore >= Beta -> % fail-high: widen
+    ; S0 >= Beta -> % fail-high: widen
         catch(alphabeta_root(Pos, Color, Depth, Alpha, B0, BestMove, BestScore), timeout, throw(timeout))
-    ; true ).
+    ; BestMove = M0, BestScore = S0
+    ).
 
 % best_move(+Pos, +Color, +Depth, -BestMove, -BestScore)
 best_move(Pos, Color, Depth, BestMove, BestScore) :-
@@ -85,12 +97,14 @@ alphabeta_root(Pos, Color, Depth, Alpha, Beta, BestMove, BestScore) :-
     ordered_moves(Pos, Color, Depth, Moves),
     search_root_moves(Pos, Color, Depth, Alpha, Beta, Moves, none, -1000000000, BestMove, BestScore).
 
+% FIX #3: Pre-evaluate Depth-1 so recursive calls pass an integer.
 search_root_moves(_Pos, _Color, _Depth, _A, _B, [], CurM, CurS, CurM, CurS).
 search_root_moves(Pos, Color, Depth, Alpha, Beta, [M|Ms], CurM, CurS, BestM, BestS) :-
     position:make_move(Pos, M, Undo),
     other_color(Color, Opp),
+    D1 is Depth - 1,
     A1 is -Beta, B1 is -Alpha,
-    alphabeta(Pos, Opp, Depth-1, A1, B1, _Reply, ReplyScore),
+    alphabeta(Pos, Opp, D1, A1, B1, _Reply, ReplyScore),
     position:unmake_move(Pos, Undo),
     Score is -ReplyScore,
     ( Score > CurS -> CurM2=M, CurS2=Score ; CurM2=CurM, CurS2=CurS ),
@@ -165,14 +179,19 @@ tt_store(Pos, Color, Depth, Alpha, Beta, Score, BestMove) :-
     assertz(tt(H, Depth, Flag, Score, BestMove)),
     cap_tt_size(20000).
 
+% FIX #5: Count TT entries once, then retract excess.
+% Old code did findall+length inside a recursive loop = O(n^2).
 cap_tt_size(Max) :-
-    findall(1, tt(_,_,_,_,_), L),
-    length(L, N),
-    ( N =< Max -> true
-    ; % crude: delete some entries
-      retract(tt(_,_,_,_,_)),
-      cap_tt_size(Max)
-    ).
+    ( predicate_property(tt(_,_,_,_,_), number_of_clauses(N)) -> true ; N = 0 ),
+    Excess is N - Max,
+    ( Excess > 0 -> retract_n(Excess) ; true ).
+
+retract_n(0) :- !.
+retract_n(N) :-
+    N > 0,
+    ( retract(tt(_,_,_,_,_)) -> true ; true ),
+    N1 is N - 1,
+    retract_n(N1).
 
 % --- Quiescence search ---
 quiescence(Pos, Color, Alpha, Beta, none, Score) :-
@@ -257,24 +276,26 @@ history_bonus(M, H) :-
 move_key(M, K) :- K = M.
 
 % --- Alpha-beta with PVS + LMR ---
+% FIX #3: Pre-evaluate Depth-1 before recursive alphabeta calls.
 search_moves_pvs(_Pos, _Color, _Depth, _A, _B, [], _I, CurM, CurS, CurM, CurS).
 search_moves_pvs(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, BestM, BestS) :-
     position:make_move(Pos, M, Undo),
     other_color(Color, Opp),
+    D1 is Depth - 1,
 
     ( I =:= 1 ->
         % full window on first move
         A1 is -Beta, B1 is -Alpha,
-        alphabeta(Pos, Opp, Depth-1, A1, B1, _Reply, ReplyScore),
+        alphabeta(Pos, Opp, D1, A1, B1, _Reply, ReplyScore),
         Score is -ReplyScore
     ; % null-window search (PVS)
       A1 is -(Alpha+1), B1 is -Alpha,
-      alphabeta(Pos, Opp, Depth-1, A1, B1, _R1, R1Score),
+      alphabeta(Pos, Opp, D1, A1, B1, _R1, R1Score),
       S1 is -R1Score,
       ( S1 > Alpha, S1 < Beta ->
           % re-search with full window
           A2 is -Beta, B2 is -Alpha,
-          alphabeta(Pos, Opp, Depth-1, A2, B2, _R2, R2Score),
+          alphabeta(Pos, Opp, D1, A2, B2, _R2, R2Score),
           Score is -R2Score
       ; Score = S1 )
     ),
@@ -296,8 +317,10 @@ search_moves_pvs(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, BestM, B
 maybe_reorder_lmr(Pos, Color, Depth, Alpha, Beta, Ms, I, CurM, CurS, BestM, BestS) :-
     search_moves_lmr(Pos, Color, Depth, Alpha, Beta, Ms, I, CurM, CurS, BestM, BestS).
 
+% FIX #3 + FIX #4: Pre-evaluate depth; use fresh variable in else-branch.
 search_moves_lmr(_Pos, _Color, _Depth, _A, _B, [], _I, CurM, CurS, CurM, CurS).
 search_moves_lmr(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, BestM, BestS) :-
+    D1 is Depth - 1,
     ( Depth >= 3,
       I > 3,
       quiet_move(Pos, Color, M),
@@ -307,30 +330,31 @@ search_moves_lmr(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, BestM, B
       % reduced-depth search
       position:make_move(Pos, M, Undo),
       other_color(Color, Opp),
-      Dred is max(0, Depth-1-Red),
+      Dred is max(0, D1-Red),
       A1 is -(Alpha+1), B1 is -Alpha,
       alphabeta(Pos, Opp, Dred, A1, B1, _R1, R1Score),
       S1 is -R1Score,
       ( S1 > Alpha ->
           % verify at full depth/window
           A2 is -(Beta), B2 is -Alpha,
-          alphabeta(Pos, Opp, Depth-1, A2, B2, _R2, R2Score),
+          alphabeta(Pos, Opp, D1, A2, B2, _R2, R2Score),
           Score is -R2Score
       ; Score = S1 ),
       position:unmake_move(Pos, Undo)
     ;
+      % FIX #4: Use S1 for null-window result, Score for final result.
+      % Old code bound Score twice causing unification failure on PVS re-search.
       position:make_move(Pos, M, Undo),
       other_color(Color, Opp),
       A1 is -(Alpha+1), B1 is -Alpha,
-      alphabeta(Pos, Opp, Depth-1, A1, B1, _R0, R0Score),
-      Score is -R0Score,
-      ( Score > Alpha, Score < Beta ->
+      alphabeta(Pos, Opp, D1, A1, B1, _R0, R0Score),
+      S1 is -R0Score,
+      ( S1 > Alpha, S1 < Beta ->
           A2 is -Beta, B2 is -Alpha,
-          alphabeta(Pos, Opp, Depth-1, A2, B2, _RR, RRScore),
-          Score2 is -RRScore
-      ; Score2 = Score ),
-      position:unmake_move(Pos, Undo),
-      Score = Score2
+          alphabeta(Pos, Opp, D1, A2, B2, _RR, RRScore),
+          Score is -RRScore
+      ; Score = S1 ),
+      position:unmake_move(Pos, Undo)
     ),
 
     ( Score > CurS -> CurM2=M, CurS2=Score ; CurM2=CurM, CurS2=CurS ),
@@ -430,11 +454,17 @@ victim_value(rook, 500).
 victim_value(queen, 900).
 victim_value(king, 0).
 
+% FIX #1: gives_check MUST always call unmake_move.
+% Old code: ( in_check -> true ; false ) — when in_check fails, 'false' fails
+% the clause, skipping unmake_move. Since make_move uses destructive setarg,
+% the position is left permanently corrupted.
+% Fix: capture the result in a flag, always unmake, then test the flag.
 gives_check(Pos, Color, M) :-
     position:make_move(Pos, M, Undo),
     other_color(Color, Enemy),
-    ( movegen:in_check(Pos, Enemy) -> true ; false ),
-    position:unmake_move(Pos, Undo).
+    ( movegen:in_check(Pos, Enemy) -> Check = true ; Check = false ),
+    position:unmake_move(Pos, Undo),
+    Check == true.
 
 uci_to_toSq(Move, ToSq) :-
     sub_string(Move, 2, 2, _, ToStr),

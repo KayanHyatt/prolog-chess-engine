@@ -18,7 +18,12 @@ other_color(black, white).
 % -------- Public --------
 
 legal_move(Pos, Color, MoveStr) :-
-    pseudo_move(Pos, Color, MoveStr),
+    % IMPORTANT: collect all pseudo-moves FIRST, then test legality.
+    % We cannot backtrack through pseudo_move while also doing make/unmake
+    % on the same Pos, because setarg mutations to the piece lists corrupt
+    % the backtracking state of member/2 inside pseudo_move.
+    findall(M, pseudo_move(Pos, Color, M), PseudoMoves),
+    member(MoveStr, PseudoMoves),
     position:make_move(Pos, MoveStr, Undo),
     ( \+ in_check(Pos, Color)
     -> position:unmake_move(Pos, Undo)

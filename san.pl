@@ -47,7 +47,7 @@ potentially incorrect SAN. In particular it:
 */
 uci_to_san_checked(Pos, Side, UciIn, San, Status, Dbg) :-
     normalize_uci(UciIn, Uci),
-    ( is_castle(Uci, CastleSan) ->
+    ( is_castle(Pos, Side, Uci, CastleSan) ->
         Dbg = dbg(none, none, king, none, true),
         ( position:apply_move(Pos, Uci, _Pos2)
         -> suffix_check(Pos, Side, Uci, CastleSan, San),
@@ -127,10 +127,10 @@ promo_letter_type("R", rook).
 promo_letter_type("B", bishop).
 promo_letter_type("N", knight).
 
-is_castle("e1g1", "O-O").
-is_castle("e1c1", "O-O-O").
-is_castle("e8g8", "O-O").
-is_castle("e8c8", "O-O-O").
+is_castle(Pos, Side, "e1g1", "O-O")   :- position:piece(Pos, Side, king, 4).
+is_castle(Pos, Side, "e1c1", "O-O-O") :- position:piece(Pos, Side, king, 4).
+is_castle(Pos, Side, "e8g8", "O-O")   :- position:piece(Pos, Side, king, 60).
+is_castle(Pos, Side, "e8c8", "O-O-O") :- position:piece(Pos, Side, king, 60).
 
 % capture detection, incl en passant
 capture_kind(Pos, Side, pawn, From, To, Capture, EpCapture) :-

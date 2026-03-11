@@ -230,8 +230,10 @@ empty_pl(pl([],[],[],[],[],[],[],[],[],[],[],[])).
 place_initial(Pos) :-
     maplist(place_piece(Pos, white),
         [rook-0, knight-1, bishop-2, queen-3, king-4, bishop-5, knight-6, rook-7]),
-    forall(between(8,15,Sq), place_piece(Pos, white, pawn-Sq)),
-    forall(between(48,55,Sq), place_piece(Pos, black, pawn-Sq)),
+    maplist(place_piece(Pos, white),
+        [pawn-8, pawn-9, pawn-10, pawn-11, pawn-12, pawn-13, pawn-14, pawn-15]),
+    maplist(place_piece(Pos, black),
+        [pawn-48, pawn-49, pawn-50, pawn-51, pawn-52, pawn-53, pawn-54, pawn-55]),
     maplist(place_piece(Pos, black),
         [rook-56, knight-57, bishop-58, queen-59, king-60, bishop-61, knight-62, rook-63]).
 
@@ -246,10 +248,41 @@ place_piece(Pos, C, T-Sq) :-
 % --------------------------
 % Cloning (for functional apply_move)
 % --------------------------
+% IMPORTANT: We cannot use copy_term/2 because SWI-Prolog may return the
+% same physical term for ground terms. Since make_move uses setarg to mutate
+% in-place, the "clone" would actually be the same object as the original.
+% We must explicitly build fresh terms.
 
-clone_position(pos(B,PL,STM,CR,EP,HM,FM,K), pos(B2,PL2,STM,CR,EP,HM,FM,K)) :-
-    copy_term(B, B2),
-    copy_term(PL, PL2).
+clone_position(pos(B,PL,STM,CR,EP,HM,FM,K), pos(B2,PL2,STM,CR2,EP,HM,FM,K)) :-
+    dup_board(B, B2),
+    dup_pl(PL, PL2),
+    dup_cr(CR, CR2).
+
+% Build a fresh board/64 term.
+dup_board(B, B2) :-
+    B =.. [board|Args],
+    B2 =.. [board|Args].
+
+% Build a fresh pl/12 term with copied lists.
+dup_pl(PL, PL2) :-
+    arg(1,PL,S1),  dup_list(S1,L1),
+    arg(2,PL,S2),  dup_list(S2,L2),
+    arg(3,PL,S3),  dup_list(S3,L3),
+    arg(4,PL,S4),  dup_list(S4,L4),
+    arg(5,PL,S5),  dup_list(S5,L5),
+    arg(6,PL,S6),  dup_list(S6,L6),
+    arg(7,PL,S7),  dup_list(S7,L7),
+    arg(8,PL,S8),  dup_list(S8,L8),
+    arg(9,PL,S9),  dup_list(S9,L9),
+    arg(10,PL,S10), dup_list(S10,L10),
+    arg(11,PL,S11), dup_list(S11,L11),
+    arg(12,PL,S12), dup_list(S12,L12),
+    PL2 = pl(L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12).
+
+dup_list([], []).
+dup_list([H|T], [H|T2]) :- dup_list(T, T2).
+
+dup_cr(cr(A,B,C,D), cr(A,B,C,D)).
 
 % --------------------------
 % Move parsing

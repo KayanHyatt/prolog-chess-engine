@@ -125,8 +125,7 @@ piece_char('k', black, king).
 % ---- Board emit ----
 
 board_string(B, BoardS) :-
-    findall(Str, (between(8,1,R), rank_string(B,R,Str)), Rev),
-    reverse(Rev, RankStrs),
+    findall(Str, (between(8,1,R), rank_string(B,R,Str)), RankStrs),
     atomic_list_concat(RankStrs, '/', BoardS).
 
 between(Hi,Lo,Hi) :- Hi>=Lo.
@@ -134,24 +133,29 @@ between(Hi,Lo,X) :- Hi>Lo, Hi1 is Hi-1, between(Hi1,Lo,X).
 
 rank_string(B, Rank, Str) :-
     Base is (Rank-1)*8,
-    findall(V, (between(0,7,Off), Sq is Base+Off, position:board_get(B,Sq,V)), Vs),
+    read_rank(B, Base, 0, 8, Vs),
     compress(Vs, Cs),
     string_chars(Str, Cs).
 
-compress([], []) :- !.
-compress(Vs, Cs) :-
-    take_empties(Vs, N, Rest),
-    ( N>0 ->
-        number_chars(N, Digits),
-        append(Digits, Cs2, Cs),
-        compress(Rest, Cs2)
-    ; Vs = [pc(C,T)|Rest2],
-      piece_char(P, C, T),
-      Cs = [P|Cs2],
-      compress(Rest2, Cs2)
-    ).
+read_rank(_B, _Base, N, N, []) :- !.
+read_rank(B, Base, I, N, [V|Vs]) :-
+    I < N,
+    Sq is Base + I,
+    position:board_get(B, Sq, V),
+    I1 is I + 1,
+    read_rank(B, Base, I1, N, Vs).
 
-take_empties([empty|Rest], N, Rest2) :-
-    take_empties(Rest, N1, Rest2),
-    N is N1 + 1.
-take_empties(Vs, 0, Vs).
+compress([], []) :- !.
+compress([empty|Rest], Cs) :- !,
+    count_empties(Rest, 1, N, Remaining),
+    number_chars(N, Digits),
+    append(Digits, Cs2, Cs),
+    compress(Remaining, Cs2).
+compress([pc(C,T)|Rest], [P|Cs]) :-
+    piece_char(P, C, T),
+    compress(Rest, Cs).
+
+count_empties([empty|Rest], Acc, N, Remaining) :- !,
+    Acc1 is Acc + 1,
+    count_empties(Rest, Acc1, N, Remaining).
+count_empties(Rest, N, N, Rest).

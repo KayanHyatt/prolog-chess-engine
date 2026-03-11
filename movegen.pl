@@ -18,18 +18,29 @@ other_color(black, white).
 % -------- Public --------
 
 legal_move(Pos, Color, MoveStr) :-
-    % IMPORTANT: collect all pseudo-moves FIRST, then test legality.
-    % We cannot backtrack through pseudo_move while also doing make/unmake
-    % on the same Pos, because setarg mutations to the piece lists corrupt
-    % the backtracking state of member/2 inside pseudo_move.
+    legal_moves_list(Pos, Color, Legals),
+    member(MoveStr, Legals).
+
+% legal_moves_list(+Pos, +Color, -Moves)
+% Deterministically collects all legal moves into a list.
+% Pseudo-moves are collected first (no mutation), then each is tested
+% with make_move/unmake_move in a deterministic loop (no backtracking
+% interleaved with mutations, so setarg is safe).
+legal_moves_list(Pos, Color, Legals) :-
     findall(M, pseudo_move(Pos, Color, M), PseudoMoves),
-    member(MoveStr, PseudoMoves),
-    position:make_move(Pos, MoveStr, Undo),
-    ( \+ in_check(Pos, Color)
-    -> position:unmake_move(Pos, Undo)
-    ;  position:unmake_move(Pos, Undo),
-       fail
-    ).
+    filter_legal(Pos, Color, PseudoMoves, Legals).
+
+filter_legal(_Pos, _Color, [], []).
+filter_legal(Pos, Color, [M|Ms], Legals) :-
+    ( position:make_move(Pos, M, Undo) ->
+        ( \+ in_check(Pos, Color) ->
+            Legals = [M|Rest]
+        ;   Legals = Rest
+        ),
+        position:unmake_move(Pos, Undo)
+    ;   Legals = Rest
+    ),
+    filter_legal(Pos, Color, Ms, Rest).
 
 in_check(Pos, Color) :-
     king_square(Pos, Color, Ksq),
@@ -97,15 +108,14 @@ rank_of(Sq, R) :- R is (Sq // 8) + 1.
 on_board(Sq) :- integer(Sq), Sq >= 0, Sq =< 63.
 
 % prevent wrap-around when stepping horizontally / diagonally
-step_ok(From, To, Delta) :-
+% Any single step (king/slider) must change file by at most 1.
+% Vertical (±8) changes file by 0; horizontal (±1) and diagonal (±7,±9) by 1.
+% A file change of 2+ means we wrapped around a board edge.
+step_ok(From, To, _Delta) :-
     file_of(From, F1),
     file_of(To,   F2),
     Df is abs(F2 - F1),
-    ( Delta =:= 1  ; Delta =:= -1  -> Df =:= 1
-    ; Delta =:= 9  ; Delta =:= -9  -> Df =:= 1
-    ; Delta =:= 7  ; Delta =:= -7  -> Df =:= 1
-    ; true  % vertical (±8) etc.
-    ).
+    Df =< 1.
 
 uci(From, To, MoveStr) :-
     position:index_sq(From, SFrom),

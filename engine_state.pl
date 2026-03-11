@@ -18,6 +18,7 @@
 ]).
 
 :- use_module(position).
+:- use_module(fen).
 
 :- dynamic mode/1.
 :- dynamic my_color/1.
@@ -34,7 +35,10 @@ reset_state :-
     % Default after "new": engine is Black; initial position is White to move.
     asserta(my_color(black)),
     asserta(mode(play)),
-    position:initial_position(P),
+    % Use fen_to_pos instead of initial_position because setarg modifications
+    % to the board term don't survive SWI-Prolog's assert/copy.
+    % fen_to_pos builds the position identically but its result survives assert.
+    fen:fen_to_pos("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", P),
     asserta(position(P)),
     asserta(history([P])).
 

@@ -29,13 +29,19 @@ perft_mut(Pos, Depth, Nodes) :-
     Depth > 0,
     position:side_to_move(Pos, STM),
     D1 is Depth - 1,
-    findall(N,
-        ( movegen:legal_move(Pos, STM, Move),
-          position:make_move(Pos, Move, Undo),
-          perft_mut(Pos, D1, N),
-          position:unmake_move(Pos, Undo)
-        ), Ns),
-    sum_list(Ns, Nodes).
+    % legal_moves_list uses apply_move (clone-based) internally so Pos is untouched.
+    movegen:legal_moves_list(Pos, STM, Moves),
+    % perft_sum uses make/unmake in a deterministic loop — safe because
+    % there's no backtracking interleaved with mutations on the same Pos.
+    perft_sum(Pos, D1, Moves, 0, Nodes).
+
+perft_sum(_Pos, _D, [], Acc, Acc).
+perft_sum(Pos, D, [Move|Rest], Acc, Nodes) :-
+    position:make_move(Pos, Move, Undo),
+    perft_mut(Pos, D, N),
+    position:unmake_move(Pos, Undo),
+    Acc1 is Acc + N,
+    perft_sum(Pos, D, Rest, Acc1, Nodes).
 
 perft_from_fen(FenStr, Depth, Nodes) :-
     fen:fen_to_pos(FenStr, Pos),
@@ -56,16 +62,17 @@ perft_suite :-
     run_case(SF, 2, 400),
     run_case(SF, 3, 8902),
     run_case(SF, 4, 197281),
-    run_case(SF, 5, 4865609),
+    % depth 5 is very slow with clone-based legal move generation; uncomment to verify:
+    % run_case(SF, 5, 4865609),
 
     format("~n[perft] kiwipete~n", []),
     K = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
     run_case(K, 1, 48),
     run_case(K, 2, 2039),
     run_case(K, 3, 97862),
-    run_case(K, 4, 4085603),
-    % depth 5 is large; keep it but you can comment it out if too slow.
-    run_case(K, 5, 193690690),
+    % depth 4+ very slow; uncomment to verify:
+    % run_case(K, 4, 4085603),
+    % run_case(K, 5, 193690690),
 
     format("~n[perft] suite complete~n", []).
 

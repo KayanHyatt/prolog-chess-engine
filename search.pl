@@ -10,11 +10,11 @@
 :- use_module(eval).
 
 /*
-All 4 phases complete:
-Phase 1: Fast eval (no movegen in eval), TT 100k, check extensions
-Phase 2: Futility pruning, MVV-LVA, delta pruning in qsearch
-Phase 3: (eval improvements — in eval.pl)
-Phase 4: Lazy eval in quiescence, cached eval for futility
+Speed-optimized search:
+- Removed gives_check from move ordering (was cloning entire position per move)
+- quiet_move no longer calls gives_check (just checks capture/promotion)
+- All other improvements retained: check extensions, futility, MVV-LVA,
+  delta pruning, lazy eval in qsearch, 100k TT
 */
 
 :- dynamic tt/5.
@@ -78,6 +78,7 @@ search_root(_,_,_,_,_,[],CurM,CurS,CurM,CurS).
 search_root(Pos, Color, Depth, Alpha, Beta, [M|Ms], CurM, CurS, BestM, BestS) :-
     position:make_move(Pos, M, Undo),
     other_color(Color, Opp),
+    % Check extension at root
     ( movegen:in_check(Pos, Opp) -> D1 is Depth ; D1 is Depth-1 ),
     A1 is -Beta, B1 is -Alpha,
     alphabeta(Pos, Opp, D1, A1, B1, _, ReplyScore),
@@ -150,7 +151,6 @@ retract_n(N) :- N>0, (retract(tt(_,_,_,_,_))->true;true), N1 is N-1, retract_n(N
 quiescence(Pos, Color, Alpha, Beta, none, Score) :-
     tick,
     ( time_up -> throw(timeout) ; true ),
-    % Phase 4: Use lazy eval for stand-pat
     eval:evaluate_lazy(Color, Pos, Alpha, Beta, Stand),
     ( Stand >= Beta -> Score = Stand, !
     ; Alpha1 is max(Alpha, Stand),
@@ -195,7 +195,7 @@ tac_score(Pos, Color, M, S) :-
     ( is_capture(Pos, Color, M, CapV) -> Cap = 50000 + CapV ; Cap = 0 ),
     S is Promo + Cap.
 
-% --- Move ordering with MVV-LVA ---
+% --- Move ordering: NO gives_check (too slow), uses MVV-LVA + killer + history ---
 
 ordered_moves(Pos, Color, Depth, Moves) :-
     ( tt_bestmove(Pos, Color, TTMove) -> true ; TTMove = none ),
@@ -210,11 +210,10 @@ ordered_moves(Pos, Color, Depth, Moves) :-
 move_score(Pos, Color, Depth, M, Score) :-
     ( is_promotion(M) -> Promo = 100000 ; Promo = 0 ),
     ( mvv_lva(Pos, Color, M, CScore) -> Cap = 50000 + CScore ; Cap = 0 ),
-    ( gives_check(Pos, Color, M) -> Chk = 12000 ; Chk = 0 ),
     killer_bonus(Depth, M, K),
     history_bonus(M, H),
     tt_bonus(Pos, Color, M, TTB),
-    Score is Promo + Cap + Chk + K + H + TTB.
+    Score is Promo + Cap + K + H + TTB.
 
 mvv_lva(Pos, Color, M, Score) :-
     uci_fromto(M, From, To),
@@ -245,7 +244,7 @@ move_key(M, M).
 
 search_pvs(_,_,_,_,_,[],_,CurM,CurS,_,CurM,CurS).
 search_pvs(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, SE, BestM, BestS) :-
-    % Futility pruning
+    % Futility pruning at low depth for quiet moves
     ( Depth =< 2, I > 1,
       \+ is_capture(Pos, Color, M, _),
       \+ is_promotion(M),
@@ -257,6 +256,7 @@ search_pvs(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, SE, BestM, Bes
       position:make_move(Pos, M, Undo),
       other_color(Color, Opp),
       D1 is Depth-1,
+      % Check extension: search deeper when giving check
       ( movegen:in_check(Pos, Opp) -> SD is D1+1 ; SD = D1 ),
 
       ( I =:= 1 ->
@@ -295,7 +295,9 @@ lmr_loop(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, SE, BestM, BestS
        lmr_loop(Pos, Color, Depth, Alpha, Beta, Ms, I1, CurM, CurS, SE, BestM, BestS)
     ;
       D1 is Depth-1,
-      ( Depth >= 3, I > 3, quiet_move(Pos, Color, M),
+      % LMR: reduce late quiet moves
+      ( Depth >= 3, I > 3,
+        quiet_move(Pos, Color, M),
         lmr_red(Depth, I, Red), Red > 0
       ->
         position:make_move(Pos, M, Undo),
@@ -332,10 +334,11 @@ lmr_loop(Pos, Color, Depth, Alpha, Beta, [M|Ms], I, CurM, CurS, SE, BestM, BestS
       )
     ).
 
+% quiet_move: FAST version — just checks it's not a capture or promotion.
+% No gives_check call (that was cloning the entire position and killing speed).
 quiet_move(Pos, Color, M) :-
     \+ is_capture(Pos, Color, M, _),
-    \+ is_promotion(M),
-    \+ gives_check(Pos, Color, M).
+    \+ is_promotion(M).
 
 lmr_red(Depth, I, 2) :- Depth >= 6, I > 6, !.
 lmr_red(Depth, I, 1) :- Depth >= 3, I > 3, !.
@@ -363,7 +366,6 @@ null_ok(Pos) :-
     NonPawn is N1+B1+R1+Q1+N2+B2+R2+Q2, NonPawn >= 3.
 
 % --- Time ---
-
 tick :- (retract(node_counter(N0))->true;N0=0), N is N0+1, asserta(node_counter(N)).
 
 time_up :-
@@ -380,7 +382,6 @@ note_history(M, Depth) :-
     (retract(hist(K, V0)) -> V is V0+Inc ; V = Inc), assertz(hist(K, V)).
 
 % --- Move features ---
-
 is_promotion(M) :- sub_string(M,_,1,0,C), member(C,["q","r","b","n","Q","R","B","N"]).
 
 is_capture(Pos, Color, M, CapV) :-
@@ -389,11 +390,6 @@ is_capture(Pos, Color, M, CapV) :-
 
 victim_value(pawn,100). victim_value(knight,320). victim_value(bishop,330).
 victim_value(rook,500). victim_value(queen,900). victim_value(king,0).
-
-gives_check(Pos, Color, M) :-
-    position:apply_move(Pos, M, Pos2),
-    other_color(Color, Enemy),
-    movegen:in_check(Pos2, Enemy).
 
 uci_to_toSq(Move, ToSq) :-
     sub_string(Move, 2, 2, _, ToStr), position:sq_index(ToStr, ToSq).

@@ -10,8 +10,8 @@
 :- ( catch(use_module(search), _, fail) -> true ; true ).
 
 % -------- configuration --------
-max_depth(10).        % allow deeper iterative deepening
-time_ms(2000).        % 2 seconds per move
+max_depth(20).        % high limit — time will be the real constraint
+time_ms(60000).       % 60 seconds per move
 avoid_window(12).
 
 choose_move(Color, Move) :-
@@ -21,17 +21,25 @@ choose_move(Color, Move) :-
 
 choose_move(Pos, Color, TimeMs, Move) :-
     findall(M, movegen:legal_move(Pos, Color, M), Ms0),
-    sort(Ms0, Ms),
+    sort(Ms0, MsAll),
+
+    % Repetition avoidance: prefer moves that don't repeat positions
+    filter_backtracks(MsAll, MsNoBack),
+    prefer_least_repeated(Pos, MsNoBack, MsBest),
+
+    % Fall back if we filtered too aggressively
+    ( MsBest == [] -> Ms = MsAll ; Ms = MsBest ),
+
     ( Ms == [] -> Move = resign
     ; ( can_search ->
-          choose_by_search(Pos, Color, Ms, TimeMs, Move)
+          choose_by_search(Pos, Color, Ms, MsAll, TimeMs, Move)
       ;   choose_by_1ply(Pos, Color, Ms, Move)
       )
     ).
 
 can_search :- functor(H, best_move, 5), predicate_property(search:H, _), !.
 
-choose_by_search(Pos, Color, Ms, TimeMs, Move) :-
+choose_by_search(Pos, Color, Ms, MsAll, TimeMs, Move) :-
     max_depth(MaxD),
     search:reset_tables,
     ( ( predicate_property(search:best_move_timed(_,_,_,_,_,_), _) ->
@@ -39,8 +47,16 @@ choose_by_search(Pos, Color, Ms, TimeMs, Move) :-
       ;   catch(search:best_move(Pos, Color, MaxD, Best, _Score), _, fail)
       ),
       Best \= none,
-      member(Best, Ms)
-    -> Move = Best
+      member(Best, MsAll)  % verify it's legal
+    ->
+      % If search found a move, prefer it unless it causes repetition
+      % and we have non-repeating alternatives
+      ( member(Best, Ms) ->
+          Move = Best  % search move is already non-repeating, great
+      ; Ms \= [] ->
+          Move = Best  % search insists on this move, trust it (might be only good move)
+      ; Move = Best
+      )
     ;  choose_by_1ply(Pos, Color, Ms, Move)
     ).
 
@@ -61,3 +77,58 @@ score_after(Pos, Color, MoveStr, Score) :-
     ( position:apply_move(Pos, MoveStr, Pos2)
     -> catch(eval:evaluate_for(Color, Pos2, Score), _, Score = 0)
     ; Score = 0 ).
+
+% ---------------------------
+% Repetition avoidance
+% ---------------------------
+
+% Prefer moves that lead to positions seen fewer times in history
+prefer_least_repeated(Pos, MovesIn, MovesOut) :-
+    findall(Cnt-M,
+        ( member(M, MovesIn),
+          repetition_cost(Pos, M, Cnt)
+        ),
+        Pairs),
+    ( Pairs == [] ->
+        MovesOut = MovesIn
+    ; keysort(Pairs, Sorted),
+      Sorted = [BestCnt-_|_],
+      findall(M, member(BestCnt-M, Sorted), BestMoves),
+      random_permutation(BestMoves, MovesOut)
+    ).
+
+% Anti-backtrack: avoid immediately undoing the last move (A->B then B->A)
+filter_backtracks(Moves, Filtered) :-
+    ( catch(last_move_uci(Last), _, fail) ->
+        exclude(is_backtrack(Last), Moves, Moves2),
+        ( Moves2 == [] -> Filtered = Moves ; Filtered = Moves2 )
+    ; Filtered = Moves ).
+
+is_backtrack(Last, M) :- inverse_uci(Last, M).
+
+last_move_uci(Last) :-
+    findall(M, engine_state:played(_, M), Ms),
+    Ms \= [],
+    last(Ms, Last).
+
+inverse_uci(M1, M2) :-
+    uci_from_to(M1, F1, T1),
+    uci_from_to(M2, F2, T2),
+    F1 =:= T2, T1 =:= F2.
+
+uci_from_to(Uci, From, To) :-
+    string_chars(Uci, [F1,R1,F2,R2|_]),
+    string_chars(SFrom, [F1,R1]),
+    string_chars(STo, [F2,R2]),
+    position:sq_index(SFrom, From),
+    position:sq_index(STo, To).
+
+% Cost = repetition count * 1000 + recent bonus * 200
+% Lower is better. Moves leading to repeated positions get high costs.
+repetition_cost(Pos, Move, Count) :-
+    ( position:apply_move(Pos, Move, Pos2) ->
+        ( catch(engine_state:repetition_count(Pos2, C), _, C = 0) ),
+        avoid_window(W),
+        ( catch(engine_state:recent_position(Pos2, W), _, fail) -> Recent = 1 ; Recent = 0 ),
+        Count is C*1000 + Recent*200
+    ; Count = 999999 ).

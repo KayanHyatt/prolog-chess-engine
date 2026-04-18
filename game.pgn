@@ -1,10 +1,17 @@
 [Event "Selfplay"]
 [Site "Local"]
-[Date "2026.03.11"]
+[Date "2026.03.23"]
 [Round "-"]
 [White "PrologEngine"]
 [Black "PrologEngine"]
-[Result "*"]
+[Result "1/2-1/2"]
 
-1. Nc3 Nc6 2. Nf3 Nf6 3. a4 a5 4. b3 b6 5. Bb2 Bb7 6. Rc1 Rc8 7. Rg1 Rg8
-8. Ra1 Ra8 9. Rc1 Rc8 10. Ra1 Ra8 11. Rc1 Rc8 *
+1. Nf3 Nf6 2. Nc3 Nc6 3. Nd5 Nxd5 4. c4 Ne5 5. cxd5 Nxf3+ 6. gxf3 c5 7. Bg2
+Qc7 8. Rg1 Qxh2 9. f4 Qxg1+ 10. Bf1 Qxf1+ 11. Kxf1 h5 12. Ke1 h4 13. Qb3 h3
+14. Qxh3 Rxh3 15. d6 exd6 16. Rb1 Rh2 17. Ra1 Rxf2 18. Kxf2 Ke7 19. Ke3 f6
+20. d4 cxd4+ 21. Kxd4 Rb8 22. Be3 Ra8 23. Rc1 Rb8 24. Rxc8 Rxc8 25. f5 g5
+26. Bxg5 fxg5 27. f6+ Kxf6 28. e3 Rc2 29. e4 Rxb2 30. e5+ dxe5+ 31. Ke4 Rxa2
+32. Kd3 d5 33. Ke3 a5 34. Kd3 b5 35. Ke3 Rc2 36. Kd3 a4 37. Kxc2 a3 38. Kd3 b4
+39. Ke3 b3 40. Kd3 a2 41. Ke3 a1=Q 42. Kd3 Qd4+ 43. Ke2 b2 44. Kf3 b1=Q
+45. Ke2 Bc5 46. Kf3 Qbe4+ 47. Kg3 Ke6 48. Kh2 g4 49. Kg3 Kd6 50. Kh2 g3+
+51. Kxg3 Qde3+ 52. Kh2 Q3f4+ 53. Kh3 Bd4 1/2-1/2
